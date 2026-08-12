@@ -44,7 +44,7 @@ jobs:
     uses: 0xVISHWAJEET/deploy-infra/.github/workflows/deploy-prod.yml@main
     with:
       runner-label: jan-score-prod   # the self-hosted runner label for this project
-      project-dir: jan-score         # directory under the runner user's home dir
+      project-path: ~/jan-score      # full path to the checkout on the runner
     secrets:
       env-file: |
         DATABASE_URL=${{ secrets.DATABASE_URL }}
