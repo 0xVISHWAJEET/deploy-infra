@@ -1,0 +1,84 @@
+name: Reusable deploy
+
+# Shared deployment logic for every project on the aspirez-prod server
+# (jan-score, land-registry-chain, media-ops, p-iden, aspirez). Each
+# project's own .github/workflows/deploy.yml is now a thin caller that
+# supplies its own runner label, checkout directory, and .env content, and
+# `uses:` this file — so a CI/CD fix only has to be made once, here,
+# instead of copy-pasted across every project's workflow file.
+#
+# This does NOT change how self-hosted runners are registered: GitHub
+# self-hosted runners on a personal (non-organization) account are always
+# scoped to the one repo they're registered against, so each project still
+# needs its own runner process on the server (already the case before this
+# repo existed — see actions-runner-<project> under the aspirez user's
+# home directory). What's centralized here is the deployment *logic*, not
+# the runner itself.
+
+on:
+  workflow_call:
+    inputs:
+      runner-label:
+        description: The self-hosted runner label registered for this project (e.g. "jan-score-prod")
+        required: true
+        type: string
+      project-dir:
+        description: Directory name under the runner user's home directory (e.g. "jan-score")
+        required: true
+        type: string
+      deploy-script:
+        description: Path to the deploy script, relative to project-dir
+        required: false
+        type: string
+        default: scripts/deploy-prod.sh
+      compose-file:
+        description: Compose file to show in the run summary's status check
+        required: false
+        type: string
+        default: docker-compose.prod.yml
+    secrets:
+      env-file:
+        description: >
+          Full contents to write to the project's .env file, one VAR=value
+          per line — composed by the caller from its own repo secrets.
+          Optional: projects with no runtime .env (e.g. aspirez) can omit
+          this and the write-env step is skipped.
+        required: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, "${{ inputs.runner-label }}"]
+    steps:
+      - name: Sync production checkout to this release
+        run: |
+          cd ~/${{ inputs.project-dir }}
+          git fetch origin --tags --force
+          git checkout --force "${{ github.ref_name }}"
+
+      - name: Write environment file from secrets
+        if: ${{ secrets.env-file != '' }}
+        run: |
+          cat > ~/${{ inputs.project-dir }}/.env <<'ENV_FILE_EOF'
+          ${{ secrets.env-file }}
+          ENV_FILE_EOF
+          chmod 600 ~/${{ inputs.project-dir }}/.env
+
+      - name: Deploy
+        run: ~/${{ inputs.project-dir }}/${{ inputs.deploy-script }}
+
+      - name: Record deployed version
+        if: success()
+        run: echo "${{ github.ref_name }}" > ~/${{ inputs.project-dir }}/.deployed-version
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy ${{ github.ref_name }} — ${{ inputs.project-dir }}"
+            echo "- Commit: \`$(git -C ~/${{ inputs.project-dir }} rev-parse HEAD)\`"
+            echo "- Status: ${{ job.status }}"
+            echo ""
+            echo '```'
+            cd ~/${{ inputs.project-dir }} && docker compose -f ${{ inputs.compose-file }} ps 2>&1 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
