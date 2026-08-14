@@ -15,14 +15,20 @@ name: Reusable deploy
 # home directory). What's centralized here is the deployment *logic*, not
 # the runner itself.
 #
-# Input/secret names use underscores, not hyphens — this is not a style
-# choice. `${{ inputs.runner-label }}` parses as `inputs.runner - label`
-# (subtraction) in GitHub Actions' expression syntax, which invalidates the
-# entire workflow file at parse time. That was the actual cause of every
-# earlier "workflow file issue" / zero-jobs failure on every calling repo
-# — not a cross-repo private-access problem (this repo was briefly made
-# public chasing that theory; it was already back to being the wrong fix
-# before this one was found and confirmed).
+# Input/secret names use underscores, not hyphens: `${{ inputs.runner-label }}`
+# parses as `inputs.runner - label` (subtraction) in GitHub Actions'
+# expression syntax. A real bug, fixed, but NOT what was actually causing
+# every deploy to fail with zero jobs and no logs ("workflow file issue").
+#
+# The actual cause, found via a manual workflow_dispatch test (which — unlike
+# a tag push — returns the real validation error instead of silently
+# producing a job-less run): `secrets` is not a recognized named-value inside
+# a step-level `if:` in a reusable (called) workflow — only inside `run:`
+# bodies and `env:` blocks. `if: ${{ secrets.env_file != '' }}` on the
+# "Write environment file" step below failed static validation every time,
+# which invalidates the whole file the same way a syntax error would. Fixed
+# by moving the "was a value even provided" check into the shell step itself
+# via an `env:`-mapped variable, never referencing `secrets` from an `if:`.
 
 on:
   workflow_call:
@@ -68,12 +74,13 @@ jobs:
           git checkout --force "${{ github.ref_name }}"
 
       - name: Write environment file from secrets
-        if: ${{ secrets.env_file != '' }}
+        env:
+          ENV_FILE_CONTENT: ${{ secrets.env_file }}
         run: |
-          cat > ${{ inputs.project_path }}/.env <<'ENV_FILE_EOF'
-          ${{ secrets.env_file }}
-          ENV_FILE_EOF
-          chmod 600 ${{ inputs.project_path }}/.env
+          if [ -n "$ENV_FILE_CONTENT" ]; then
+            printf '%s\n' "$ENV_FILE_CONTENT" > ${{ inputs.project_path }}/.env
+            chmod 600 ${{ inputs.project_path }}/.env
+          fi
 
       - name: Deploy
         run: ${{ inputs.project_path }}/${{ inputs.deploy_script }}
