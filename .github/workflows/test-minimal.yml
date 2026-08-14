@@ -2,9 +2,16 @@ name: Test Minimal Reusable
 
 on:
   workflow_call:
+    inputs:
+      runner_label:
+        required: true
+        type: string
+    secrets:
+      env_file:
+        required: false
 
 jobs:
   hello:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
     steps:
-      - run: echo "hello from deploy-infra"
+      - run: echo "hello from deploy-infra, secret present:${{ secrets.env_file != '' }}"
