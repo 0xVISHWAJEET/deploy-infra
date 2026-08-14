@@ -1,17 +1,96 @@
-name: Test Minimal Reusable
+name: Reusable deploy
+
+# Shared deployment logic for every project on the aspirez-prod server
+# (jan-score, land-registry-chain, media-ops, p-iden, aspirez). Each
+# project's own .github/workflows/deploy.yml is now a thin caller that
+# supplies its own runner label, checkout path, and .env content, and
+# `uses:` this file — so a CI/CD fix only has to be made once, here,
+# instead of copy-pasted across every project's workflow file.
+#
+# This does NOT change how self-hosted runners are registered: GitHub
+# self-hosted runners on a personal (non-organization) account are always
+# scoped to the one repo they're registered against, so each project still
+# needs its own runner process on the server (already the case before this
+# repo existed — see actions-runner-<project> under the aspirez user's
+# home directory). What's centralized here is the deployment *logic*, not
+# the runner itself.
+#
+# Input/secret names use underscores, not hyphens — this is not a style
+# choice. `${{ inputs.runner-label }}` parses as `inputs.runner - label`
+# (subtraction) in GitHub Actions' expression syntax, which invalidates the
+# entire workflow file at parse time. That was the actual cause of every
+# earlier "workflow file issue" / zero-jobs failure on every calling repo
+# — not a cross-repo private-access problem (this repo was briefly made
+# public chasing that theory; it was already back to being the wrong fix
+# before this one was found and confirmed).
 
 on:
   workflow_call:
     inputs:
       runner_label:
+        description: The self-hosted runner label registered for this project (e.g. "jan-score-prod")
         required: true
         type: string
+      project_path:
+        description: >
+          Full path to the project's checkout on the runner, e.g. "~/jan-score"
+          or "/mnt/d/2026/aspirez" for a non-home-relative checkout. Bash
+          tilde-expands "~" normally, so either form works.
+        required: true
+        type: string
+      deploy_script:
+        description: Path to the deploy script, relative to project_path
+        required: false
+        type: string
+        default: scripts/deploy-prod.sh
+      compose_file:
+        description: Compose file to show in the run summary's status check
+        required: false
+        type: string
+        default: docker-compose.prod.yml
     secrets:
       env_file:
+        description: >
+          Full contents to write to the project's .env file, one VAR=value
+          per line — composed by the caller from its own repo secrets.
+          Optional: projects with no runtime .env (e.g. aspirez) can omit
+          this and the write-env step is skipped.
         required: false
 
 jobs:
-  hello:
+  deploy:
     runs-on: [self-hosted, "${{ inputs.runner_label }}"]
     steps:
-      - run: echo "hello from deploy-infra, secret present:${{ secrets.env_file != '' }}"
+      - name: Sync checkout to this release
+        run: |
+          cd ${{ inputs.project_path }}
+          git fetch origin --tags --force
+          git checkout --force "${{ github.ref_name }}"
+
+      - name: Write environment file from secrets
+        if: ${{ secrets.env_file != '' }}
+        run: |
+          cat > ${{ inputs.project_path }}/.env <<'ENV_FILE_EOF'
+          ${{ secrets.env_file }}
+          ENV_FILE_EOF
+          chmod 600 ${{ inputs.project_path }}/.env
+
+      - name: Deploy
+        run: ${{ inputs.project_path }}/${{ inputs.deploy_script }}
+
+      - name: Record deployed version
+        if: success()
+        run: echo "${{ github.ref_name }}" > ${{ inputs.project_path }}/.deployed-version
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy ${{ github.ref_name }} — ${{ inputs.project_path }}"
+            echo "- Commit: \`$(git -C ${{ inputs.project_path }} rev-parse HEAD)\`"
+            echo "- Status: ${{ job.status }}"
+            echo ""
+            echo '```'
+            cd ${{ inputs.project_path }} && docker compose -f ${{ inputs.compose_file }} ps 2>&1 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
