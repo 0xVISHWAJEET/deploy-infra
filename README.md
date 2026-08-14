@@ -43,17 +43,23 @@ jobs:
   deploy-prod:
     uses: 0xVISHWAJEET/deploy-infra/.github/workflows/deploy-prod.yml@main
     with:
-      runner-label: jan-score-prod   # the self-hosted runner label for this project
-      project-path: ~/jan-score      # full path to the checkout on the runner
+      runner_label: jan-score-prod   # the self-hosted runner label for this project
+      project_path: ~/jan-score      # full path to the checkout on the runner
     secrets:
-      env-file: |
+      env_file: |
         DATABASE_URL=${{ secrets.DATABASE_URL }}
         AUTH_SECRET=${{ secrets.AUTH_SECRET }}
         # ...every secret this project's .env needs
 ```
 
-`env-file` is optional — a project with no runtime `.env` (like aspirez)
+`env_file` is optional — a project with no runtime `.env` (like aspirez)
 can omit the `secrets:` block entirely.
+
+Input/secret names use underscores, not hyphens, on purpose — see the
+comment at the top of `deploy-prod.yml`: a hyphenated name like
+`runner-label` parses as subtraction (`inputs.runner - label`) when
+referenced via `${{ inputs.runner-label }}`, which silently invalidates
+the whole workflow file. Keep any new input/secret name underscore-only.
 
 ## Making a change
 

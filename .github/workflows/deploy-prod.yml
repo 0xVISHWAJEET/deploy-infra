@@ -14,33 +14,42 @@ name: Reusable deploy
 # repo existed — see actions-runner-<project> under the aspirez user's
 # home directory). What's centralized here is the deployment *logic*, not
 # the runner itself.
+#
+# Input/secret names use underscores, not hyphens — this is not a style
+# choice. `${{ inputs.runner-label }}` parses as `inputs.runner - label`
+# (subtraction) in GitHub Actions' expression syntax, which invalidates the
+# entire workflow file at parse time. That was the actual cause of every
+# earlier "workflow file issue" / zero-jobs failure on every calling repo
+# — not a cross-repo private-access problem (this repo was briefly made
+# public chasing that theory; it was already back to being the wrong fix
+# before this one was found and confirmed).
 
 on:
   workflow_call:
     inputs:
-      runner-label:
+      runner_label:
         description: The self-hosted runner label registered for this project (e.g. "jan-score-prod")
         required: true
         type: string
-      project-path:
+      project_path:
         description: >
           Full path to the project's checkout on the runner, e.g. "~/jan-score"
           or "/mnt/d/2026/aspirez" for a non-home-relative checkout. Bash
           tilde-expands "~" normally, so either form works.
         required: true
         type: string
-      deploy-script:
-        description: Path to the deploy script, relative to project-path
+      deploy_script:
+        description: Path to the deploy script, relative to project_path
         required: false
         type: string
         default: scripts/deploy-prod.sh
-      compose-file:
+      compose_file:
         description: Compose file to show in the run summary's status check
         required: false
         type: string
         default: docker-compose.prod.yml
     secrets:
-      env-file:
+      env_file:
         description: >
           Full contents to write to the project's .env file, one VAR=value
           per line — composed by the caller from its own repo secrets.
@@ -50,38 +59,38 @@ on:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, "${{ inputs.runner-label }}"]
+    runs-on: [self-hosted, "${{ inputs.runner_label }}"]
     steps:
       - name: Sync checkout to this release
         run: |
-          cd ${{ inputs.project-path }}
+          cd ${{ inputs.project_path }}
           git fetch origin --tags --force
           git checkout --force "${{ github.ref_name }}"
 
       - name: Write environment file from secrets
-        if: ${{ secrets.env-file != '' }}
+        if: ${{ secrets.env_file != '' }}
         run: |
-          cat > ${{ inputs.project-path }}/.env <<'ENV_FILE_EOF'
-          ${{ secrets.env-file }}
+          cat > ${{ inputs.project_path }}/.env <<'ENV_FILE_EOF'
+          ${{ secrets.env_file }}
           ENV_FILE_EOF
-          chmod 600 ${{ inputs.project-path }}/.env
+          chmod 600 ${{ inputs.project_path }}/.env
 
       - name: Deploy
-        run: ${{ inputs.project-path }}/${{ inputs.deploy-script }}
+        run: ${{ inputs.project_path }}/${{ inputs.deploy_script }}
 
       - name: Record deployed version
         if: success()
-        run: echo "${{ github.ref_name }}" > ${{ inputs.project-path }}/.deployed-version
+        run: echo "${{ github.ref_name }}" > ${{ inputs.project_path }}/.deployed-version
 
       - name: Summary
         if: always()
         run: |
           {
-            echo "### Deploy ${{ github.ref_name }} — ${{ inputs.project-path }}"
-            echo "- Commit: \`$(git -C ${{ inputs.project-path }} rev-parse HEAD)\`"
+            echo "### Deploy ${{ github.ref_name }} — ${{ inputs.project_path }}"
+            echo "- Commit: \`$(git -C ${{ inputs.project_path }} rev-parse HEAD)\`"
             echo "- Status: ${{ job.status }}"
             echo ""
             echo '```'
-            cd ${{ inputs.project-path }} && docker compose -f ${{ inputs.compose-file }} ps 2>&1 || true
+            cd ${{ inputs.project_path }} && docker compose -f ${{ inputs.compose_file }} ps 2>&1 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
