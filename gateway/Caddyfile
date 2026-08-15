@@ -1,0 +1,43 @@
+# Shared path-based gateway for every project on this box, fronting them under one
+# domain/port instead of five separate ports — the intended end state is
+# https://aspireztech.com/ (this app at root) + /media, /land, /jan-score, /identity for
+# the others. Every upstream is reached via `host.docker.internal` (see this gateway's
+# docker-compose.yml `extra_hosts`), i.e. the SAME host-published port each project's own
+# per-project Caddy already exposes — this gateway adds a routing layer in front of them,
+# it does not replace or bypass any project's existing deploy.
+#
+# IMPORTANT — basePath: a path-mounted app (e.g. /media/*) must itself know it's mounted
+# under that prefix, or its HTML will load but request its JS/CSS bundles from the wrong
+# (root) path and 404. /land is built that way today (land-registry-chain/frontend's
+# NEXT_PUBLIC_BASE_PATH build arg — see its Dockerfile and next.config.js) via a
+# gateway-specific image on port 3082, alongside its normal, unprefixed standalone deploy
+# on 8082. /media, /jan-score, and /identity have the equivalent basePath support already
+# written into their frontends (media-ops/jan-score: NEXT_PUBLIC_BASE_PATH;
+# p-iden: VITE_BASE_PATH) but have NOT yet had a gateway-flavored image built and deployed
+# — until that happens, those three routes below will serve broken (unstyled,
+# non-functional) pages, not because the routing is wrong, but because those upstreams are
+# still serving root-relative assets. This is a known, temporary, documented gap — see
+# deploy-infra/gateway/README.md for what "finishing" each one involves.
+
+:80 {
+	handle /land* {
+		reverse_proxy host.docker.internal:3082
+	}
+
+	handle /media* {
+		reverse_proxy host.docker.internal:8083
+	}
+
+	handle /jan-score* {
+		reverse_proxy host.docker.internal:8081
+	}
+
+	handle /identity* {
+		reverse_proxy host.docker.internal:8084
+	}
+
+	# Aspirez is the flagship/root site — no basePath needed, it already serves at "/".
+	handle {
+		reverse_proxy host.docker.internal:8080
+	}
+}
