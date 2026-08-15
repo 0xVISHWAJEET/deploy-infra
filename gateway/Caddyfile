@@ -1,43 +1,31 @@
-# Shared path-based gateway for every project on this box, fronting them under one
-# domain/port instead of five separate ports — the intended end state is
-# https://aspireztech.com/ (this app at root) + /media, /land, /jan-score, /identity for
-# the others. Every upstream is reached via `host.docker.internal` (see this gateway's
-# docker-compose.yml `extra_hosts`), i.e. the SAME host-published port each project's own
-# per-project Caddy already exposes — this gateway adds a routing layer in front of them,
-# it does not replace or bypass any project's existing deploy.
+# Example path-based gateway config — routes multiple apps under one Caddy instance
+# instead of exposing each on its own port. Copy this file, replace the placeholder paths
+# and ports below with your own, and keep your real, filled-in version out of version
+# control (or in a private repo) since it will name your actual internal services.
 #
-# IMPORTANT — basePath: a path-mounted app (e.g. /media/*) must itself know it's mounted
-# under that prefix, or its HTML will load but request its JS/CSS bundles from the wrong
-# (root) path and 404. /land is built that way today (land-registry-chain/frontend's
-# NEXT_PUBLIC_BASE_PATH build arg — see its Dockerfile and next.config.js) via a
-# gateway-specific image on port 3082, alongside its normal, unprefixed standalone deploy
-# on 8082. /media, /jan-score, and /identity have the equivalent basePath support already
-# written into their frontends (media-ops/jan-score: NEXT_PUBLIC_BASE_PATH;
-# p-iden: VITE_BASE_PATH) but have NOT yet had a gateway-flavored image built and deployed
-# — until that happens, those three routes below will serve broken (unstyled,
-# non-functional) pages, not because the routing is wrong, but because those upstreams are
-# still serving root-relative assets. This is a known, temporary, documented gap — see
-# deploy-infra/gateway/README.md for what "finishing" each one involves.
+# Every upstream here is reached via `host.docker.internal` (see docker-compose.yml's
+# `extra_hosts`) — i.e. whatever port each app already publishes on this host. This
+# gateway only adds a routing layer in front of already-running services; it doesn't
+# replace or change any app's own deploy.
+#
+# IMPORTANT — basePath: an app mounted under a path prefix (e.g. /app1/*) needs to know
+# about that prefix itself, or its HTML will load but request its own JS/CSS bundles from
+# the wrong (root) path and 404. Framework-specific examples: Next.js's `basePath`/
+# `assetPrefix` config (baked in at build time — a path-mounted build is a separate image
+# from the app's normal root-mounted one, not a runtime toggle), or for a client-side-routed
+# SPA, your bundler's `base` option plus your router's equivalent `basename`.
 
 :80 {
-	handle /land* {
-		reverse_proxy host.docker.internal:3082
+	handle /app1* {
+		reverse_proxy host.docker.internal:3001
 	}
 
-	handle /media* {
-		reverse_proxy host.docker.internal:8083
+	handle /app2* {
+		reverse_proxy host.docker.internal:3002
 	}
 
-	handle /jan-score* {
-		reverse_proxy host.docker.internal:8081
-	}
-
-	handle /identity* {
-		reverse_proxy host.docker.internal:8084
-	}
-
-	# Aspirez is the flagship/root site — no basePath needed, it already serves at "/".
+	# The root/flagship app — no basePath needed, it already serves at "/".
 	handle {
-		reverse_proxy host.docker.internal:8080
+		reverse_proxy host.docker.internal:3000
 	}
 }

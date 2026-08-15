@@ -22,4 +22,4 @@ if [ "$healthy" != "true" ]; then
   exit 1
 fi
 
-echo "==> Gateway live at http://localhost:8888/ (/, /land, /media, /jan-score, /identity)"
+echo "==> Gateway live at http://localhost:8888/ — see Caddyfile for configured paths"

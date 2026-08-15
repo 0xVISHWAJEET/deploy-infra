@@ -1,11 +1,10 @@
 name: shared-gateway
 
-# Deliberately NOT bound to host port 80/443 — this box's port 80 already serves an
-# unrelated existing service (Nextcloud), and claiming 443 for real HTTPS needs a real
-# domain (aspireztech.com) actually pointed at this box first. Both are decisions for
-# whoever owns this server, not something a deploy script should silently take — see
-# README.md "Going live on aspireztech.com" for the two ways to resolve that. Until then,
-# this gateway is real and fully working at http://<host>:8888/.
+# Not bound to host port 80/443 by default — this host may already have something else
+# answering there, and claiming 443 for real HTTPS needs a real domain pointed at this
+# host first. Both are infrastructure decisions to make deliberately, not something a
+# script should assume — see README.md "Going live" for options. Until then, this gateway
+# works fine on the alternate port below.
 services:
   caddy:
     image: caddy:2-alpine
@@ -18,6 +17,5 @@ services:
     extra_hosts:
       # Standard Linux Docker doesn't provide host.docker.internal automatically (that's a
       # Docker Desktop convenience) — this is the documented way to get the same behavior
-      # on a plain Linux host, letting the Caddyfile reach every project's own
-      # already-published port uniformly.
+      # on a plain Linux host, letting the Caddyfile reach each app's own published port.
       - "host.docker.internal:host-gateway"

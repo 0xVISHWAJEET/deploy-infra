@@ -1,19 +1,16 @@
-# Shared gateway
+# Shared gateway (example)
 
-A single Caddy instance that path-routes to every project on this box, so they can
-eventually all sit behind one domain instead of five separate ports:
+A single Caddy instance that path-routes to multiple independently-deployed apps on the
+same host, so they can eventually sit behind one domain instead of one port each.
 
-| Path | Project | Upstream |
-|---|---|---|
-| `/` | aspirez (flagship site) | `host.docker.internal:8080` |
-| `/land*` | land-registry-chain | `host.docker.internal:3082` (gateway-flavored build, see below) |
-| `/media*` | media-ops | `host.docker.internal:8083` |
-| `/jan-score*` | jan-score | `host.docker.internal:8081` |
-| `/identity*` | p-iden | `host.docker.internal:8084` |
+`Caddyfile` here is a template with placeholder paths (`/app1`, `/app2`) and ports — copy
+it, fill in your own app names/ports, and keep your filled-in version out of a public repo
+(or in a private one), since it will name your actual internal services and hostnames.
+`docker-compose.yml` and `deploy.sh` need no per-app changes.
 
-Each project keeps its own independent deploy pipeline, database, and standalone port
-exactly as before — this gateway only adds a routing layer in front of them. Nothing about
-an individual project's own deploy changes because this exists.
+Each app keeps its own independent deploy pipeline, database, and standalone port exactly
+as before — this gateway only adds a routing layer in front of them. Nothing about an
+individual app's own deploy changes because this exists.
 
 ## Deploying the gateway itself
 
@@ -21,51 +18,39 @@ an individual project's own deploy changes because this exists.
 ./deploy.sh
 ```
 
-Brings up Caddy on **host port 8888** (deliberately not 80/443 — see "Going live" below).
-Verify: `curl http://localhost:8888/`, `curl http://localhost:8888/land`, etc.
+Brings up Caddy on **host port 8888** (see the port 80/443 note in `docker-compose.yml`).
+Verify: `curl http://localhost:8888/`, `curl http://localhost:8888/app1`, etc.
 
-## The basePath requirement (why /media, /jan-score, /identity aren't finished yet)
+## The basePath requirement
 
 A path-mounted app has to know it's mounted under that prefix, or its page loads but then
-requests its own JS/CSS bundles from the wrong (root) path and 404s. Every affected
-frontend already has this wired in as a build-time toggle, defaulting off (their normal
-standalone deploy is completely unaffected):
+requests its own JS/CSS bundles from the wrong (root) path and 404s. This needs to be
+solved per app, at build time:
 
-- **land-registry-chain** (Next.js): `NEXT_PUBLIC_BASE_PATH` build arg in
-  `frontend/Dockerfile` / `next.config.js`. **Done** — a gateway build (`/land`) exists and
-  is deployed on port 3082 via `land-registry-chain/scripts/deploy-gateway-frontend.sh`.
-- **media-ops** (Next.js): same pattern, `frontend/next.config.js`. Code is ready; no
-  gateway-flavored image has been built/deployed yet.
-- **jan-score** (Next.js): same pattern, `next.config.ts`. Code is ready; no gateway-flavored
-  image has been built/deployed yet.
-- **p-iden** (Vite/React, client-side routed): `VITE_BASE_PATH` build arg +
-  `BrowserRouter basename` in `frontend/src/main.tsx`. Code is ready; no gateway-flavored
-  build has been produced yet.
+- **Next.js**: `basePath` / `assetPrefix` config, typically driven by a build-time env var
+  so the app's normal root-mounted deploy is unaffected and a path-mounted build is a
+  second, separate image.
+- **A client-side-routed SPA** (e.g. Vite + React Router): your bundler's `base` option,
+  plus passing the equivalent value as your router's `basename` so client-side route
+  matching agrees with where the app is actually mounted.
 
-To finish one of the remaining three: build that project's frontend image with the
-relevant base-path build arg set (mirroring `deploy-gateway-frontend.sh`'s pattern), run it
-as its own container published on a free host port, and point this Caddyfile's matching
-`handle` block at that port instead of the project's existing unprefixed one. Until that's
-done, hitting `/media`, `/jan-score`, or `/identity` here will load a page with broken
-styling/JS — the routing is correct, the upstream just isn't gateway-aware yet.
+Until an app has this wired in and a path-mounted build has actually been produced and
+deployed, routing a path prefix to its normal (unprefixed) deploy will load a page with
+broken styling/JS — the gateway routing itself isn't the problem, the upstream just isn't
+gateway-aware yet.
 
-## Going live on aspireztech.com
+## Going live on a real domain
 
-This gateway is real and fully working today at `http://<this-host>:8888/`. Two things are
-still needed to make it the thing `aspireztech.com` actually resolves to, and both are
-infrastructure decisions for whoever owns this server, not something to change silently:
+This gateway works today at `http://<this-host>:8888/`. Two more things are needed to make
+it what your real domain actually resolves to, and both are infrastructure decisions for
+whoever owns the server, not something to change silently:
 
-1. **DNS**: point `aspireztech.com` (and ideally `www.aspireztech.com`) at this host's
-   public IP.
-2. **Port 80/443**: this host's port 80 is currently serving an unrelated existing site
-   (Nextcloud). Port 443 is unclaimed. To let this gateway answer on the real ports, either:
-   - move this gateway to 80/443 and put Nextcloud behind it instead (e.g. at a path or
-     subdomain of its own), or
-   - give this gateway a dedicated public IP/port and leave Nextcloud where it is.
-
-   Either is a reasonable choice; this repo doesn't make it for you.
+1. **DNS**: point your domain at this host's public IP.
+2. **Port 80/443**: if something else already answers on port 80 on this host, either move
+   this gateway there and put the existing service behind it instead (e.g. at its own path
+   or subdomain), or give this gateway a dedicated public IP/port and leave the existing
+   service where it is.
 
 Once both are settled, add HTTPS by changing the Caddyfile's `:80` block to
-`aspireztech.com, www.aspireztech.com { ... }` (Caddy auto-provisions a Let's Encrypt
-cert for real domains) and updating `docker-compose.yml`'s published ports to `80:80` /
-`443:443`.
+`yourdomain.com, www.yourdomain.com { ... }` (Caddy auto-provisions a Let's Encrypt cert
+for real domains) and updating `docker-compose.yml`'s published ports to `80:80` / `443:443`.
